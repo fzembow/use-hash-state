@@ -2,12 +2,20 @@
   "name": "use-hash-state",
   "version": "1.0.0",
   "description": "Store application state in the URL hash",
-  "main": "index.js",
+  "main": "lib/use-hash-state.js",
+  "types": "lib/use-hash-state.d.ts",
   "scripts": {
     "build": "tsc",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run lint",
+    "version": "git add -A src",
+    "postversion": "git push && git push --tags"
   },
+  "files": [
+    "lib/**/*"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/fzembow/use-hash-state.git"

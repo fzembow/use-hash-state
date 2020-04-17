@@ -27,6 +27,7 @@ const useHashState = <T extends object>(
 ): [T, (key: keyof T, value: unknown) => void] => {
   const didRender = useRef<boolean>(false);
 
+  // Synchronously check the URL hash on the first render
   if (!didRender.current) {
     const parsedState = parseState<T>();
     if (parsedState) {
