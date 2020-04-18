@@ -2,25 +2,30 @@ import { useRef, useState, useEffect } from 'react';
 import { debounce } from 'ts-debounce';
 import { setsAreEqual } from './utils';
 
-interface StateObject {
-  [key: string]: object;
-  [key: number]: object;
-}
+type Json =
+  | null
+  | boolean
+  | number
+  | string
+  | Json[]
+  | { [prop: string]: Json };
 
-interface ObjectValidator<T extends {}> {
-  (obj: StateObject): obj is T;
+type JsonMap = { [prop: string]: Json };
+
+export interface JSONValidator<T extends {}> {
+  (obj: JsonMap): boolean;
 }
 
 interface UseHashStateOptions<T extends {}> {
   usePushState?: boolean;
   validateKeysAndTypes?: boolean;
-  customValidator?: ObjectValidator<T>;
+  customValidator?: JSONValidator<T>;
 }
 
 const DEBOUNCE_WRITE_URL_MS = 100;
 
 const parseStateFromUrl = <T extends {}>(
-  customValidator?: (obj: StateObject) => obj is T
+  validator?: JSONValidator<T>
 ): T | undefined => {
   const hash = window.location.hash.slice(1);
   if (!hash) {
@@ -29,9 +34,12 @@ const parseStateFromUrl = <T extends {}>(
 
   try {
     const obj = JSON.parse(decodeURIComponent(hash));
-    if (customValidator) {
-      if (customValidator(obj)) {
-        return obj;
+    if (!obj) {
+      return;
+    }
+    if (validator) {
+      if (validator(obj)) {
+        return obj as T;
       } else {
         console.warn('Object in URL hash is invalid, ignoring');
         console.warn(obj);
@@ -40,13 +48,14 @@ const parseStateFromUrl = <T extends {}>(
       return obj as T;
     }
   } catch (e) {
+    console.warn('URL hash is not valid JSON, ignoring');
     // JSON parsing failed
   }
   return undefined;
 };
 
 const writeStateToUrl = debounce(
-  (newState: unknown, usePushState = false): void => {
+  (newState: {}, usePushState = false): void => {
     const json = JSON.stringify(newState);
     const { title } = document;
     const url = `${window.location.pathname}#${encodeURIComponent(json)}`;
@@ -57,29 +66,32 @@ const writeStateToUrl = debounce(
     }
   },
   DEBOUNCE_WRITE_URL_MS,
-  {
-    isImmediate: true,
-  }
 );
 
 const getKeysAndTypesValidator = <T extends {}>(
   initialState: T
-): ObjectValidator<T> => {
+): JSONValidator<T> => {
   const initialStateKeys = new Set(Object.keys(initialState));
   const initialStateTypes: { [key: string]: string } = {};
   for (const key in initialState) {
     initialStateTypes[key] = typeof initialState[key];
   }
 
-  return (obj: StateObject): obj is T => {
-    if (!setsAreEqual(initialStateKeys, new Set(Object.keys(obj)))) {
+  return (obj: {}): boolean => {
+    if (typeof obj !== 'object' || obj === null) {
       return false;
     }
 
-    const objKeys: Array<keyof typeof obj> = Object.keys(obj);
+    const dict = obj as { [key: string]: object };
+    if (!setsAreEqual(initialStateKeys, new Set(Object.keys(dict)))) {
+      return false;
+    }
+
+    const objKeys = Object.keys(dict);
     for (let i = 0; i < objKeys.length; i++) {
       const key = objKeys[i];
-      const keyType = typeof obj[key];
+      const value = dict[key];
+      const keyType = typeof value;
       if (keyType !== initialStateTypes[key]) {
         return false;
       }
@@ -91,16 +103,16 @@ const getKeysAndTypesValidator = <T extends {}>(
 const buildValidator = <T extends {}>(
   initialState: T,
   validateKeysAndTypes?: boolean,
-  customValidator?: ObjectValidator<T>
-): ObjectValidator<T> => {
-  const validators: ObjectValidator<T>[] = [];
+  customValidator?: JSONValidator<T>
+): JSONValidator<T> => {
+  const validators: JSONValidator<T>[] = [];
   if (validateKeysAndTypes) {
     validators.push(getKeysAndTypesValidator<T>(initialState));
   }
   if (customValidator) {
     validators.push(customValidator);
   }
-  return (obj: StateObject): obj is T => validators.every((v) => v(obj));
+  return (obj: {}): boolean => validators.every((v) => v(obj));
 };
 
 const useHashState = <T extends {}>(
@@ -112,12 +124,11 @@ const useHashState = <T extends {}>(
   }: UseHashStateOptions<T> = { usePushState: false }
 ): {
   state: T;
-  setState: React.Dispatch<React.SetStateAction<T>>;
-  setStateAtKey: (key: keyof T, value: unknown) => void;
+  setStateAtKey: (key: keyof T, value: {}) => void;
 } => {
   const didRender = useRef<boolean>(false);
 
-  let initialValidator: ObjectValidator<T> | undefined;
+  let initialValidator: JSONValidator<T> | undefined;
   if (!didRender.current) {
     initialValidator = buildValidator(
       initialState,
@@ -137,22 +148,22 @@ const useHashState = <T extends {}>(
     didRender.current = true;
   }
 
-  const [validator, setValidator] = useState<ObjectValidator<T> | undefined>(
-    initialValidator
-  );
+  const validatorRef = useRef<JSONValidator<T> | undefined>(initialValidator);
   const [state, setState] = useState<T>(initialState);
+
+
   useEffect(() => {
-    setValidator(
-      buildValidator(initialState, validateKeysAndTypes, customValidator)
-    );
+    validatorRef.current = buildValidator(initialState, validateKeysAndTypes, customValidator)
   }, [initialState, validateKeysAndTypes, customValidator]);
 
+
   const onHashChange = (): void => {
-    const parsedState = parseStateFromUrl<T>(validator);
+    const parsedState = parseStateFromUrl<T>(validatorRef.current);
     if (parsedState) {
       setState(parsedState);
     }
   };
+
 
   useEffect(() => {
     window.addEventListener('hashchange', onHashChange);
@@ -161,7 +172,8 @@ const useHashState = <T extends {}>(
     };
   }, []);
 
-  const setStateAtKey = (key: keyof T, value: unknown): void => {
+
+  const setStateAtKey = (key: keyof T, value: {}): void => {
     setState((prevState) => {
       const newState = {
         ...prevState,
@@ -173,7 +185,7 @@ const useHashState = <T extends {}>(
     });
   };
 
-  return {state, setState, setStateAtKey};
+  return {state, setStateAtKey};
 };
 
 export default useHashState;
