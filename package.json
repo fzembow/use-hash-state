@@ -39,5 +39,8 @@
   },
   "peerDependencies": {
     "react": "^16.8"
+  },
+  "dependencies": {
+    "ts-debounce": "^2.0.1"
   }
 }

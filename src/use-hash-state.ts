@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
+import { debounce } from "ts-debounce";
 
-const parseState = <T extends object>(): T | undefined => {
+const parseStateFromUrl = <T extends object>(): T | undefined => {
   const hash = window.location.hash.slice(1);
   if (!hash) {
     return;
@@ -13,14 +14,16 @@ const parseState = <T extends object>(): T | undefined => {
   }
 };
 
-const saveState = (newState: unknown): void => {
+const writeStateToUrl = debounce((newState: unknown): void => {
   const json = JSON.stringify(newState);
   history.replaceState(
     undefined,
     document.title,
     window.location.pathname + '#' + encodeURIComponent(json)
   );
-};
+}, undefined, {
+  isImmediate: true
+});
 
 const useHashState = <T extends object>(
   initialState: T
@@ -29,11 +32,11 @@ const useHashState = <T extends object>(
 
   // Synchronously check the URL hash on the first render
   if (!didRender.current) {
-    const parsedState = parseState<T>();
+    const parsedState = parseStateFromUrl<T>();
     if (parsedState) {
       initialState = parsedState;
     } else if (initialState) {
-      saveState(initialState);
+      writeStateToUrl(initialState);
     }
     didRender.current = true;
   }
@@ -46,7 +49,7 @@ const useHashState = <T extends object>(
         ...prevState,
         [key]: value,
       };
-      saveState(newState);
+      writeStateToUrl(newState);
       return newState;
     });
   };
