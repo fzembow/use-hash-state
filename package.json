@@ -1,6 +1,6 @@
 {
   "name": "use-hash-state",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Store application state in the URL hash",
   "main": "lib/use-hash-state.js",
   "types": "lib/use-hash-state.d.ts",
