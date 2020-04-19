@@ -32,6 +32,10 @@ const DEBOUNCE_WRITE_URL_MS = 100;
 const parseStateFromUrl = <T extends {}>(
   validator?: JSONValidator
 ): T | undefined => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
   const hash = window.location.hash.slice(1);
   if (!hash) {
     return;
@@ -60,13 +64,16 @@ const parseStateFromUrl = <T extends {}>(
 };
 
 const writeStateToUrl = debounce((newState: {}, usePushState = false): void => {
+  if (typeof window === 'undefined') {
+    return;
+  }
   const json = JSON.stringify(newState);
   const { title } = document;
   const url = `${window.location.pathname}#${encodeURIComponent(json)}`;
   if (usePushState) {
-    history.pushState(undefined, title, url);
+    window.history.pushState(undefined, title, url);
   } else {
-    history.replaceState(undefined, title, url);
+    window.history.replaceState(undefined, title, url);
   }
 }, DEBOUNCE_WRITE_URL_MS);
 
