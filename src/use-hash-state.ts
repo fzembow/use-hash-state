@@ -12,20 +12,25 @@ type Json =
 
 type JsonMap = { [prop: string]: Json };
 
-export interface JSONValidator<T extends {}> {
+export interface JSONValidator {
   (obj: JsonMap): boolean;
 }
 
-interface UseHashStateOptions<T extends {}> {
+interface UseHashStateOptions {
   usePushState?: boolean;
   validateKeysAndTypes?: boolean;
-  customValidator?: JSONValidator<T>;
+  customValidator?: JSONValidator;
 }
+
+const DEFAULT_OPTIONS: UseHashStateOptions = {
+  usePushState: false,
+  validateKeysAndTypes: true,
+};
 
 const DEBOUNCE_WRITE_URL_MS = 100;
 
 const parseStateFromUrl = <T extends {}>(
-  validator?: JSONValidator<T>
+  validator?: JSONValidator
 ): T | undefined => {
   const hash = window.location.hash.slice(1);
   if (!hash) {
@@ -54,23 +59,20 @@ const parseStateFromUrl = <T extends {}>(
   return undefined;
 };
 
-const writeStateToUrl = debounce(
-  (newState: {}, usePushState = false): void => {
-    const json = JSON.stringify(newState);
-    const { title } = document;
-    const url = `${window.location.pathname}#${encodeURIComponent(json)}`;
-    if (usePushState) {
-      history.pushState(undefined, title, url);
-    } else {
-      history.replaceState(undefined, title, url);
-    }
-  },
-  DEBOUNCE_WRITE_URL_MS,
-);
+const writeStateToUrl = debounce((newState: {}, usePushState = false): void => {
+  const json = JSON.stringify(newState);
+  const { title } = document;
+  const url = `${window.location.pathname}#${encodeURIComponent(json)}`;
+  if (usePushState) {
+    history.pushState(undefined, title, url);
+  } else {
+    history.replaceState(undefined, title, url);
+  }
+}, DEBOUNCE_WRITE_URL_MS);
 
 const getKeysAndTypesValidator = <T extends {}>(
   initialState: T
-): JSONValidator<T> => {
+): JSONValidator => {
   const initialStateKeys = new Set(Object.keys(initialState));
   const initialStateTypes: { [key: string]: string } = {};
   for (const key in initialState) {
@@ -103,9 +105,9 @@ const getKeysAndTypesValidator = <T extends {}>(
 const buildValidator = <T extends {}>(
   initialState: T,
   validateKeysAndTypes?: boolean,
-  customValidator?: JSONValidator<T>
-): JSONValidator<T> => {
-  const validators: JSONValidator<T>[] = [];
+  customValidator?: JSONValidator
+): JSONValidator => {
+  const validators: JSONValidator[] = [];
   if (validateKeysAndTypes) {
     validators.push(getKeysAndTypesValidator<T>(initialState));
   }
@@ -117,18 +119,23 @@ const buildValidator = <T extends {}>(
 
 const useHashState = <T extends {}>(
   initialState: T,
-  {
-    usePushState,
-    validateKeysAndTypes,
-    customValidator,
-  }: UseHashStateOptions<T> = { usePushState: false }
+  options?: UseHashStateOptions
 ): {
   state: T;
   setStateAtKey: (key: keyof T, value: {}) => void;
 } => {
+  const {
+    usePushState = false,
+    validateKeysAndTypes = true,
+    customValidator,
+  } = {
+    ...DEFAULT_OPTIONS,
+    ...options,
+  };
+
   const didRender = useRef<boolean>(false);
 
-  let initialValidator: JSONValidator<T> | undefined;
+  let initialValidator: JSONValidator | undefined;
   if (!didRender.current) {
     initialValidator = buildValidator(
       initialState,
@@ -148,14 +155,16 @@ const useHashState = <T extends {}>(
     didRender.current = true;
   }
 
-  const validatorRef = useRef<JSONValidator<T> | undefined>(initialValidator);
+  const validatorRef = useRef<JSONValidator | undefined>(initialValidator);
   const [state, setState] = useState<T>(initialState);
 
-
   useEffect(() => {
-    validatorRef.current = buildValidator(initialState, validateKeysAndTypes, customValidator)
+    validatorRef.current = buildValidator(
+      initialState,
+      validateKeysAndTypes,
+      customValidator
+    );
   }, [initialState, validateKeysAndTypes, customValidator]);
-
 
   const onHashChange = (): void => {
     const parsedState = parseStateFromUrl<T>(validatorRef.current);
@@ -164,14 +173,12 @@ const useHashState = <T extends {}>(
     }
   };
 
-
   useEffect(() => {
     window.addEventListener('hashchange', onHashChange);
     return (): void => {
       window.removeEventListener('hashchange', onHashChange);
     };
   }, []);
-
 
   const setStateAtKey = (key: keyof T, value: {}): void => {
     setState((prevState) => {
@@ -185,7 +192,7 @@ const useHashState = <T extends {}>(
     });
   };
 
-  return {state, setStateAtKey};
+  return { state, setStateAtKey };
 };
 
 export default useHashState;
