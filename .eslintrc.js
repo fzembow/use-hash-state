@@ -8,6 +8,6 @@ module.exports = {
     "plugin:@typescript-eslint/recommended",
   ],
   rules: {
-    "@typescript-eslint/interface-name-prefix": "off"
+    "@typescript-eslint/interface-name-prefix": "off",
   }
 };

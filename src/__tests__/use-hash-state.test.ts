@@ -1,20 +1,45 @@
-import useHashState, { JSONValidator } from '../use-hash-state';
+import useHashState from '../use-hash-state';
 import { renderHook, act } from '@testing-library/react-hooks';
-
-jest.useFakeTimers();
+import deepEqual from "fast-deep-equal";
 
 describe('useHashState', () => {
+  // Solution from https://stackoverflow.com/a/57612297/9878135
+  delete window.location;
+  window = Object.create(window);
+  // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+  // @ts-ignore
+  window.location = {
+    // Required fields for this library
+    hostname: 'localhost',
+    hash: "",
+  };
+
+  const expectHashToEqual = (expectedState: any): void => {
+    const hash = window.location.hash.slice(1);
+    const decodedData = decodeURIComponent(hash);
+    const actualState = JSON.parse(decodedData);
+
+    expect(actualState).toEqual(expectedState);
+  }
+
   beforeEach(() => {
+    window.location.hash = "#";
     location.hash = '#';
     jest.spyOn(console, 'warn').mockImplementation(() => jest.fn());
-    jest.spyOn(history, 'replaceState').mockImplementation(() => jest.fn());
-    jest.spyOn(history, 'pushState').mockImplementation(() => jest.fn());
+    // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+    // @ts-ignore
+    jest.spyOn(history, 'replaceState').mockImplementation((x, y, url: string) => {
+      window.location.hash = "#" + url.split("#")[1];
+    });
+    // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+    // @ts-ignore
+    jest.spyOn(history, 'pushState').mockImplementation((x, y, url: string) => {
+      window.location.hash = "#" + url.split("#")[1];
+    });
   });
 
   afterEach(() => {
-    (console.warn as jest.Mock).mockRestore();
-    (history.replaceState as jest.Mock).mockRestore();
-    (history.pushState as jest.Mock).mockRestore();
+    jest.restoreAllMocks();
   });
 
   test('sets initial state if no hash', () => {
@@ -24,12 +49,12 @@ describe('useHashState', () => {
     };
 
     const { result } = renderHook(() => useHashState(initialState));
-    const { state } = result.current;
+    const [state] = result.current;
     expect(state).toEqual(initialState);
-    expect(console.warn).toHaveBeenCalledTimes(0);
+    expectHashToEqual(initialState);
   });
 
-  test('accepts valid JSON within hash', () => {
+  test('accepts valid JSON', () => {
     const hashState = {
       foo: 'zoo',
     };
@@ -38,148 +63,103 @@ describe('useHashState', () => {
     };
     location.hash = `#${encodeURIComponent(JSON.stringify(hashState))}`;
     const { result } = renderHook(() => useHashState(initialState));
-    const { state } = result.current;
+    const [state] = result.current;
     expect(state).toEqual(hashState);
-    expect(console.warn).toHaveBeenCalledTimes(0);
+    expectHashToEqual(hashState);
   });
 
-  test('rejects invalid JSON within hash', () => {
+  test('rejects invalid JSON', () => {
     location.hash = '#AKJSFKLASJF';
     const initialState = {
       foo: 'bar',
     };
     const { result } = renderHook(() => useHashState(initialState));
-    const { state } = result.current;
+    const [state] = result.current;
     expect(state).toEqual(initialState);
-    expect(console.warn).toHaveBeenCalledWith(
-      'URL hash is not valid JSON, ignoring'
-    );
+    expectHashToEqual(initialState);
   });
 
-  test('rejects JSON not matching initialState keys', () => {
+  test('uses custom validator if return type is not undefined', () => {
+    const value = "Invalid_Json";
+    location.hash = "#" + value;
     const initialState = {
       foo: 'bar',
     };
-    const invalidState = {
-      zoo: 'bar',
-    };
-    location.hash = `#${encodeURIComponent(JSON.stringify(invalidState))}`;
-    const { result } = renderHook(() =>
-      useHashState(initialState, { validateKeysAndTypes: true })
-    );
-    const { state } = result.current;
-    expect(state).toEqual(initialState);
-    expect(console.warn).toHaveBeenNthCalledWith(
-      1,
-      'Object in URL hash is invalid, ignoring'
-    );
-    expect(console.warn).toHaveBeenNthCalledWith(2, invalidState);
+    const { result } = renderHook(() => useHashState(initialState, {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
+      // @ts-ignore
+      parse: () => value,
+      dump: () => value,
+    }));
+    const [state] = result.current;
+    expect(state).toEqual(value);
+
+    // Custom test because it's not json
+    const hash = window.location.hash.slice(1);
+    expect(hash).toBe(value);
   });
 
-  test('rejects JSON not matching initialState types', () => {
+  test('uses initialState if custom parser returns undefined', () => {
+    const value = "#NotValidJson";
+    location.hash = value;
     const initialState = {
       foo: 'bar',
     };
-    const invalidState = {
-      foo: true,
-    };
-    location.hash = `#${encodeURIComponent(JSON.stringify(invalidState))}`;
-    const { result } = renderHook(() =>
-      useHashState(initialState, { validateKeysAndTypes: true })
-    );
-    const { state } = result.current;
+    const { result } = renderHook(() => useHashState(initialState, {
+      parse: () => undefined,
+    }));
+    const [state]  = result.current;
     expect(state).toEqual(initialState);
-    expect(console.warn).toHaveBeenNthCalledWith(
-      1,
-      'Object in URL hash is invalid, ignoring'
-    );
-    expect(console.warn).toHaveBeenNthCalledWith(2, invalidState);
+    expectHashToEqual(initialState);
   });
 
-  test('rejects JSON not matching custom validator', () => {
-    interface State {
-      foo: string;
-    }
-    const initialState: State = {
+  test("updates url on change", () => {
+    const initialState = {
       foo: 'bar',
     };
-    const invalidState: State = {
+    const newState = {
       foo: 'zoo',
     };
-    const validator: JSONValidator = (obj): boolean => {
-      if (obj['foo'] === undefined) {
-        return false;
-      }
-      if (typeof obj['foo'] !== 'string') {
-        return false;
-      }
-      if (!['bar', 'baz'].includes(obj['foo'])) {
-        return false;
-      }
-      return true;
-    };
-    location.hash = `#${encodeURIComponent(JSON.stringify(invalidState))}`;
-    const { result } = renderHook(() =>
-      useHashState<State>(initialState, { customValidator: validator })
-    );
-    const { state } = result.current;
+    const { result } = renderHook(() => useHashState(initialState));
+    const [state, setState] = result.current;
     expect(state).toEqual(initialState);
-    expect(console.warn).toHaveBeenNthCalledWith(
-      1,
-      'Object in URL hash is invalid, ignoring'
-    );
-    expect(console.warn).toHaveBeenNthCalledWith(2, invalidState);
-  });
-
-  test('replaces history by default', () => {
-    interface State {
-      foo: string;
-    }
-    const initialState: State = {
-      foo: 'bar',
-    };
-    const { result } = renderHook(() => useHashState<State>(initialState));
-    const { state, setStateAtKey } = result.current;
-    expect(state).toEqual(initialState);
+    expectHashToEqual(initialState);
 
     act(() => {
-      setStateAtKey('foo', 'zoo');
-    });
+      setState(newState);
+    })
 
-    jest.advanceTimersByTime(500);
-    jest.runAllTimers();
+    expectHashToEqual(newState);
+  })
 
-    const expected = `/#${encodeURIComponent(JSON.stringify({ foo: 'zoo' }))}`;
-    expect(history.replaceState).toHaveBeenCalledWith(undefined, '', expected);
-    expect(history.pushState).toHaveBeenCalledTimes(0);
-  });
-
-  test('uses pushHistory if desired', () => {
-    interface State {
-      foo: string;
-    }
-    const initialState: State = {
+  test("updates url on change and uses pushHistory if desired", () => {
+    const initialState = {
       foo: 'bar',
     };
-    const { result } = renderHook(() =>
-      useHashState<State>(initialState, { usePushState: true })
-    );
-    const { state, setStateAtKey } = result.current;
+    const newState = {
+      foo: 'zoo',
+    };
+    const { result } = renderHook(() => useHashState(initialState, {
+      pushHistoryState: true,
+      equalFn: deepEqual
+    }));
+    const [state, setState] = result.current;
     expect(state).toEqual(initialState);
+    expectHashToEqual(initialState);
 
     act(() => {
-      setStateAtKey('foo', 'zoo');
-    });
+      setState(newState);
+    })
 
-    jest.advanceTimersByTime(500);
-    jest.runAllTimers();
+    expect(result.current[0]).toEqual(newState);
+    expectHashToEqual(newState);
 
-    const expected = `/#${encodeURIComponent(JSON.stringify({ foo: 'zoo' }))}`;
     expect(history.replaceState).toHaveBeenCalledTimes(0);
-    expect(history.pushState).toHaveBeenCalledWith(undefined, '', expected);
-  });
+    // 1 initial call + 1 setState call
+    expect(history.pushState).toHaveBeenCalledTimes(1 + 1);
+  })
 
-  test('debounces writing to the URL', () => {
+  test('updates state when the URL hash changes', () => {
     interface State {
       foo: string;
     }
@@ -187,45 +167,13 @@ describe('useHashState', () => {
       foo: 'bar',
     };
     const { result } = renderHook(() => useHashState<State>(initialState));
-    const { state, setStateAtKey } = result.current;
-    expect(state).toEqual(initialState);
-
-    act(() => {
-      setStateAtKey('foo', 'zoo');
-    });
-
-    act(() => {
-      setStateAtKey('foo', 'boo');
-    });
-
-    act(() => {
-      setStateAtKey('foo', 'new');
-    });
-
-    jest.advanceTimersByTime(500);
-    jest.runAllTimers();
-
-    const expected = `/#${encodeURIComponent(JSON.stringify({ foo: 'new' }))}`;
-    expect(history.replaceState).toHaveBeenCalledTimes(1);
-    expect(history.replaceState).toHaveBeenCalledWith(undefined, '', expected);
-    expect(history.pushState).toHaveBeenCalledTimes(0);
-  });
-
-  test('updates state when the URL hash changes', async () => {
-    interface State {
-      foo: string;
-    }
-    const initialState: State = {
-      foo: 'bar',
-    };
-    const { result } = renderHook(() => useHashState<State>(initialState));
-    const { state } = result.current;
+    const [state]  = result.current;
     expect(state).toEqual(initialState);
 
     act(() => {
       location.hash = `#${encodeURIComponent(JSON.stringify({ foo: 'new' }))}`;
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
-    expect(result.current.state.foo).toBe('new');
+    expect(result.current[0].foo).toBe('new');
   });
 });
